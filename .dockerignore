@@ -1,0 +1,11 @@
+.git
+.idea
+.venv
+__pycache__
+*.py[cod]
+data
+*.db
+*.db-shm
+*.db-wal
+.env
+SECURITY_AUDIT.md

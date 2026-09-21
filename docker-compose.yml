@@ -1,0 +1,26 @@
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: production
+      DATABASE_PATH: /app/data/telemetry.db
+      ESP_API_KEY: ${ESP_API_KEY:?Set ESP_API_KEY in .env}
+      GEOCODING_USER_AGENT: ${GEOCODING_USER_AGENT:-ESP-Fleet-Monitor/1.0}
+      WRITE_RATE_LIMIT_PER_MINUTE: ${WRITE_RATE_LIMIT_PER_MINUTE:-120}
+    volumes:
+      - telemetry_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  telemetry_data:

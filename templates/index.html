@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP Fleet Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=8">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">MULTI-DEVICE TELEMETRY</p>
+        <h1>ESP Fleet <span>Monitor</span></h1>
+        <p class="subtitle">Все контроллеры и их состояние в одном месте</p>
+      </div>
+      <div class="fleet-summary">
+        <div><strong id="total-count">0</strong><span>всего</span></div>
+        <div><strong id="online-count">0</strong><span>на связи</span></div>
+        <div><strong id="offline-count">0</strong><span>нет связи</span></div>
+      </div>
+    </header>
+
+    <section>
+      <div class="section-title">
+        <div><p class="eyebrow">DEVICES</p><h2>Контроллеры ESP32</h2></div>
+        <div class="device-actions"><small id="device-hint">Нажмите на строку ESP, чтобы посмотреть её историю</small><button id="compare-toggle" type="button">Сравнить ESP</button></div>
+      </div>
+      <div class="device-row fleet-table" id="device-row">
+        <div class="empty-state">Ожидание первого устройства…</div>
+      </div>
+    </section>
+
+    <section class="comparison" id="comparison" hidden>
+      <div class="comparison-heading"><div><p class="eyebrow">COMPARISON</p><h2>Сравнение двух ESP</h2></div><button id="compare-close" type="button">Закрыть сравнение</button></div>
+      <div id="comparison-content"></div>
+      <div class="comparison-chart" id="comparison-chart-section" hidden>
+        <div class="comparison-chart-toolbar">
+          <div><h3>Общий график</h3><p>Одна шкала времени и значений для двух ESP. Замеры не обязаны совпадать по времени.</p></div>
+          <label>Метрика <select id="compare-metric"></select></label>
+          <label>Период <select id="compare-range"><option value="1">1 час</option><option value="6" selected>6 часов</option><option value="12">12 часов</option></select></label>
+        </div>
+        <div class="comparison-legend"><span id="compare-legend-a"></span><span id="compare-legend-b"></span></div>
+        <canvas id="compare-chart" aria-label="Сравнение выбранной метрики двух ESP"></canvas>
+        <p id="compare-chart-note"></p>
+      </div>
+    </section>
+
+    <section class="details" id="details" hidden>
+      <div class="selected-device-card">
+        <div class="selected-device-title">
+          <p class="eyebrow">SELECTED DEVICE</p>
+          <h2 id="selected-name">—</h2>
+          <p class="device-meta" id="selected-threshold"></p>
+        </div>
+        <div class="location-card" id="selected-location">Координаты не заданы</div>
+      </div>
+      <div class="history-toolbar">
+        <div><p class="eyebrow">HISTORY</p><h2>История измерений</h2><span>Выберите метрику и временной диапазон</span></div>
+        <div class="history-controls">
+          <label>Показать
+            <select id="history-range">
+              <option value="1">1 час</option><option value="24" selected>24 часа</option>
+              <option value="168">7 дней</option><option value="720">30 дней</option>
+              <option value="day">Конкретную дату…</option>
+            </select>
+          </label>
+          <label id="history-date-control" hidden>Дата <input id="history-date" type="date"></label>
+        </div>
+      </div>
+      <div class="history-metrics" id="history-metrics"></div>
+      <article class="metric-detail" id="metric-detail">
+        <header><div><p class="eyebrow">SELECTED METRIC</p><h2 id="detail-title">—</h2></div><div id="detail-stats"></div></header>
+        <p class="metric-explanation" id="metric-explanation"></p>
+        <div class="detail-chart-wrap">
+          <canvas id="detail-chart" aria-label="График выбранной метрики"></canvas>
+          <div class="chart-tooltip" id="chart-tooltip" hidden></div>
+        </div>
+        <div class="chart-period"><span id="chart-from">—</span><span>Время измерения →</span><span id="chart-to">—</span></div>
+        <div class="detail-values" id="detail-values"></div>
+      </article>
+    </section>
+  </main>
+  <script src="{{ url_for('static', path='/app.js') }}?v=8" defer></script>
+</body>
+</html>
