@@ -23,8 +23,10 @@ h2 { margin: 0; font-size: 1.4rem; letter-spacing: -.035em; }
 .section-title { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
 .device-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
 button { font: inherit; }
-#compare-toggle, #compare-close { padding: 9px 14px; border: 1px solid rgba(169,155,255,.5); border-radius: 11px; background: rgba(169,155,255,.09); color: #dcd6ff; font-size: .7rem; font-weight: 700; cursor: pointer; transition: background .2s, border-color .2s, transform .2s; }
+#compare-toggle, #compare-close, #average-toggle { padding: 9px 14px; border: 1px solid rgba(169,155,255,.5); border-radius: 11px; background: rgba(169,155,255,.09); color: #dcd6ff; font-size: .7rem; font-weight: 700; cursor: pointer; transition: background .2s, border-color .2s, transform .2s; }
 #compare-toggle:hover, #compare-toggle:focus-visible, #compare-toggle.active, #compare-close:hover, #compare-close:focus-visible { border-color: var(--purple); background: rgba(169,155,255,.2); outline: none; transform: translateY(-1px); }
+#average-toggle { border-color: rgba(100,244,189,.4); background: rgba(100,244,189,.06); color: var(--mint); }
+#average-toggle:hover, #average-toggle:focus-visible, #average-toggle.active { border-color: var(--mint); background: rgba(100,244,189,.17); outline: none; }
 .device-row { margin-top: 14px; overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: rgba(8,20,17,.72); }
 .fleet-head, .device-card { display: grid; grid-template-columns: minmax(190px,1.6fr) repeat(7,minmax(90px,1fr)); min-width: 920px; align-items: center; column-gap: 8px; }
 .fleet-head { padding: 10px 14px; color: var(--muted); font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; }

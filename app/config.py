@@ -8,6 +8,9 @@ DATABASE_PATH = Path(os.getenv("DATABASE_PATH", DATA_DIR / "telemetry.db"))
 
 DEFAULT_TEMPERATURE_THRESHOLD = 30.0
 ONLINE_TIMEOUT_SECONDS = 90
+# Temperature is sampled every five minutes; keep its alert until the next
+# expected sample (with room for one missed cycle), while heartbeat tracks online.
+TEMPERATURE_STALE_SECONDS = 11 * 60
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
 ESP_API_KEY = os.getenv("ESP_API_KEY")
 WRITE_RATE_LIMIT_PER_MINUTE = int(os.getenv("WRITE_RATE_LIMIT_PER_MINUTE", "120"))

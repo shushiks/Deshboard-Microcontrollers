@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=9">
+  <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v=10">
 </head>
 <body>
   <main class="shell">
@@ -27,7 +27,7 @@
     <section>
       <div class="section-title">
         <div><p class="eyebrow">DEVICES</p><h2>Контроллеры ESP32</h2></div>
-        <div class="device-actions"><small id="device-hint">Нажмите на строку ESP, чтобы посмотреть её историю</small><button id="compare-toggle" type="button">Сравнить ESP</button></div>
+        <div class="device-actions"><small id="device-hint">Нажмите на строку ESP, чтобы посмотреть её историю</small><button id="average-toggle" type="button" aria-pressed="false">Среднее за 5: выкл</button><button id="compare-toggle" type="button">Сравнить ESP</button></div>
       </div>
       <div class="device-row fleet-table" id="device-row">
         <div class="empty-state">Ожидание первого устройства…</div>
@@ -84,6 +84,6 @@
       </article>
     </section>
   </main>
-  <script src="{{ url_for('static', path='/app.js') }}?v=9" defer></script>
+  <script src="{{ url_for('static', path='/app.js') }}?v=10" defer></script>
 </body>
 </html>

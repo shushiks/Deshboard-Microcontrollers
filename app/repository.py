@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .config import DATABASE_PATH, DEFAULT_TEMPERATURE_THRESHOLD, ONLINE_TIMEOUT_SECONDS
+from .config import DATABASE_PATH, DEFAULT_TEMPERATURE_THRESHOLD, ONLINE_TIMEOUT_SECONDS, TEMPERATURE_STALE_SECONDS
 from .geocoding import reverse_geocode
 from .schemas import DeviceUpdate, MetricsInput
 
@@ -179,6 +179,10 @@ def save_metrics(payload: MetricsInput) -> dict[str, Any]:
 
 
 def list_devices() -> list[dict[str, Any]]:
+    averaged_metrics = (
+        "air_temperature", "air_pressure", "water_temperature", "humidity",
+        "air_quality", "ph", "raindrop",
+    )
     with _connection() as connection:
         rows = connection.execute(
             """
@@ -207,18 +211,40 @@ def list_devices() -> list[dict[str, Any]]:
             ORDER BY d.name COLLATE NOCASE
             """
         ).fetchall()
+        # Each metric has its own cadence; fetch its five most recent non-null
+        # readings rather than averaging the last five rows of mixed sensors.
+        rolling_averages: dict[str, dict[str, float | None]] = {}
+        rolling_counts: dict[str, dict[str, int]] = {}
+        for row in rows:
+            device_id = row["device_id"]
+            rolling_averages[device_id] = {}
+            rolling_counts[device_id] = {}
+            for metric in averaged_metrics:
+                values = connection.execute(
+                    f"""SELECT {metric} FROM readings
+                        WHERE device_id = ? AND {metric} IS NOT NULL
+                        ORDER BY COALESCE(captured_at, received_at) DESC, id DESC
+                        LIMIT 5""",
+                    (device_id,),
+                ).fetchall()
+                rolling_counts[device_id][metric] = len(values)
+                rolling_averages[device_id][metric] = (
+                    sum(value[0] for value in values) / len(values) if values else None
+                )
 
     now = datetime.now(timezone.utc)
     devices: list[dict[str, Any]] = []
     for row in rows:
         item = dict(row)
         item.pop("geocode_attempted_at", None)
+        item["rolling_averages"] = rolling_averages[item["device_id"]]
+        item["rolling_counts"] = rolling_counts[item["device_id"]]
         last_seen = datetime.fromisoformat(item["last_seen"])
         item["online"] = (now - last_seen).total_seconds() < ONLINE_TIMEOUT_SECONDS
         temperatures = [item.get("air_temperature"), item.get("water_temperature")]
         item["temperature_alert"] = item["online"] and any(
             item.get(f"{metric}_at") is not None
-            and (now - datetime.fromisoformat(item[f"{metric}_at"])).total_seconds() < ONLINE_TIMEOUT_SECONDS
+            and (now - datetime.fromisoformat(item[f"{metric}_at"])).total_seconds() < TEMPERATURE_STALE_SECONDS
             and item[metric] > item["temperature_threshold"]
             for metric in ("air_temperature", "water_temperature")
             if item[metric] is not None

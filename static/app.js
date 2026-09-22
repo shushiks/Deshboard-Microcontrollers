@@ -1,6 +1,7 @@
 const state = {
-  devices: [], selectedId: sessionStorage.getItem("selectedDeviceId"), history: [], metric: "air_temperature", detailPoints: [],
+  devices: [], selectedId: sessionStorage.getItem("selectedDeviceId"), history: [], metric: sessionStorage.getItem("selectedMetric") || "air_temperature", detailPoints: [],
   compareMode: false, compareIds: [], compareHistory: {}, compareRequest: 0,
+  showAverage: false,
 };
 const metricInfo = {
   air_temperature: ["Температура воздуха", "°C", "#64f4bd"],
@@ -20,6 +21,27 @@ const metricDescriptions = {
   ph: "Кислотность воды: 7 — нейтральная среда, меньше 7 — кислая, больше 7 — щелочная.",
   raindrop: "Сырое значение датчика капель. Направление шкалы зависит от модуля и требует калибровки.",
 };
+if (!Object.hasOwn(metricInfo, state.metric)) state.metric = "air_temperature";
+const averageWindow = 5;
+function rollingMetricPoints(readings, metric) {
+  const result = [];
+  const window = [];
+  let sum = 0;
+  for (const reading of readings) {
+    const raw = reading[metric];
+    if (!Number.isFinite(raw)) continue;
+    window.push(raw);
+    sum += raw;
+    if (window.length > averageWindow) sum -= window.shift();
+    result.push({...reading, [metric]: sum / window.length, rawValue: raw, averageCount: window.length});
+  }
+  return result;
+}
+function displayMetricPoints(readings, metric) {
+  if (state.showAverage) return rollingMetricPoints(readings, metric);
+  return readings.filter(item => Number.isFinite(item[metric]))
+    .map(item => ({...item, rawValue: item[metric], averageCount: 1}));
+}
 const el = {
   row: document.querySelector("#device-row"), details: document.querySelector("#details"),
   online: document.querySelector("#online-count"), name: document.querySelector("#selected-name"),
@@ -32,6 +54,7 @@ const el = {
   explanation: document.querySelector("#metric-explanation"), chartFrom: document.querySelector("#chart-from"),
   chartTo: document.querySelector("#chart-to"), tooltip: document.querySelector("#chart-tooltip"),
   dateControl: document.querySelector("#history-date-control"), compareToggle: document.querySelector("#compare-toggle"),
+  averageToggle: document.querySelector("#average-toggle"),
   compareClose: document.querySelector("#compare-close"), comparison: document.querySelector("#comparison"),
   comparisonContent: document.querySelector("#comparison-content"), deviceHint: document.querySelector("#device-hint"),
   compareChartSection: document.querySelector("#comparison-chart-section"), compareMetric: document.querySelector("#compare-metric"),
@@ -56,10 +79,10 @@ function renderDevices() {
   el.total.textContent = state.devices.length; el.online.textContent = onlineCount; el.offline.textContent = state.devices.length-onlineCount;
   if (!state.devices.length) { el.row.innerHTML = '<div class="empty-state">Ожидание первого устройства…</div>'; return; }
   const columns = [["air_temperature","Воздух","°C"],["air_pressure","Давление","гПа"],["water_temperature","Вода","°C"],["humidity","Влажность воздуха","%"],["air_quality","Газ MQ-5","raw"],["ph","Кислотность","pH"] ,["raindrop","Интенсивность дождя","raw"]];
-  el.row.innerHTML = `<div class="fleet-head"><span>Резервуар / ESP</span>${columns.map(([,label]) => `<span>${label}</span>`).join("")}</div>` + state.devices.map(device => `
+  el.row.innerHTML = `<div class="fleet-head"><span>Резервуар / ESP</span>${columns.map(([,label]) => `<span>${label}${state.showAverage ? ` · ср. ${averageWindow}` : ""}</span>`).join("")}</div>` + state.devices.map(device => `
     <article class="device-card ${device.temperature_alert ? "alert" : ""} ${!state.compareMode && device.device_id === state.selectedId ? "active" : ""} ${state.compareIds.includes(device.device_id) ? "compare-selected" : ""}" data-id="${escapeHtml(device.device_id)}" role="button" tabindex="0" title="Порог температуры: ${show(device.temperature_threshold)} °C; красный цвет — только при свежем превышении" aria-label="${state.compareMode ? "Выбрать для сравнения" : "Открыть историю"} ${escapeHtml(device.name)}">
       <div class="device-identity"><i class="status ${device.online ? "online" : ""}" title="${device.online ? "На связи" : `Нет heartbeat: ${formatAge(device.last_seen)}`}"></i><div><h3>${escapeHtml(device.name)}</h3></div></div>
-      ${columns.map(([key,,unit]) => `<div class="device-value" title="Последнее обновление: ${formatTime(device[`${key}_at`], true)}"><strong>${show(device[key], key === "air_quality" || key === "raindrop" ? 0 : 1)}</strong><small>${unit}${device[key] == null ? "" : ` · ${formatAge(device[`${key}_at`])}`}</small></div>`).join("")}
+      ${columns.map(([key,,unit]) => `<div class="device-value" title="${state.showAverage ? `Среднее ${device.rolling_counts?.[key] ?? 0} из ${averageWindow}; ` : ""}Последний замер: ${show(device[key])} ${unit}; обновлено: ${formatTime(device[`${key}_at`], true)}"><strong>${show(state.showAverage ? device.rolling_averages?.[key] : device[key], key === "air_quality" || key === "raindrop" ? 0 : 1)}</strong><small>${unit}${device[key] == null ? "" : ` · ${formatAge(device[`${key}_at`])}`}</small></div>`).join("")}
       ${state.compareMode ? `<span class="compare-marker">${state.compareIds.indexOf(device.device_id) + 1 || "+"}</span>` : ""}
     </article>`).join("");
   el.row.querySelectorAll(".device-card").forEach(card => {
@@ -103,7 +126,9 @@ function renderComparison() {
   el.comparisonContent.innerHTML = `<div class="comparison-names"><strong>${escapeHtml(first.name)}</strong><span>против</span><strong>${escapeHtml(second.name)}</strong></div>
     <div class="comparison-table"><div class="comparison-row comparison-header"><span>Метрика</span><span>${escapeHtml(first.name)}</span><span>${escapeHtml(second.name)}</span><span>Разница B − A</span></div>
     ${Object.entries(metricInfo).map(([key,[label,unit]]) => {
-      const a = first[key], b = second[key], digits = key === "air_quality" || key === "raindrop" ? 0 : 1;
+      const a = state.showAverage ? first.rolling_averages?.[key] : first[key];
+      const b = state.showAverage ? second.rolling_averages?.[key] : second[key];
+      const digits = key === "air_quality" || key === "raindrop" ? 0 : 1;
       const difference = Number.isFinite(a) && Number.isFinite(b) ? b-a : null;
       return `<div class="comparison-row"><span>${label}</span><strong>${show(a,digits)} ${a == null ? "" : unit}</strong><strong>${show(b,digits)} ${b == null ? "" : unit}</strong><b>${difference == null ? "—" : `${difference > 0 ? "+" : ""}${show(difference,digits)} ${unit}`}</b></div>`;
     }).join("")}</div>`;
@@ -134,10 +159,10 @@ async function loadComparisonHistory() {
 function drawComparisonChart() {
   if (!state.compareMode || state.compareIds.length !== 2 || el.compareChartSection.hidden) return;
   const metric = el.compareMetric.value, [label, unit] = metricInfo[metric];
-  const ids = state.compareIds, series = ids.map(id => (state.compareHistory[id] || [])
-    .filter(item => Number.isFinite(item[metric]) && Number.isFinite(Date.parse(sampleTime(item)))));
+  const ids = state.compareIds, series = ids.map(id => displayMetricPoints(state.compareHistory[id] || [], metric)
+    .filter(item => Number.isFinite(Date.parse(sampleTime(item)))));
   const count = series.map(points => points.length);
-  el.compareChartNote.textContent = `${label}, ${unit}: ${count[0]} и ${count[1]} замеров соответственно. Линии строятся по фактическому времени каждого устройства.`;
+  el.compareChartNote.textContent = `${label}, ${unit}: ${count[0]} и ${count[1]} замеров. ${state.showAverage ? `Линии — скользящее среднее по последним ${averageWindow} замерам.` : "Линии — исходные замеры."}`;
   const canvas = el.compareChart, width = canvas.clientWidth, height = canvas.clientHeight;
   if (!width || !height) return;
   const ratio = window.devicePixelRatio || 1;
@@ -246,12 +271,12 @@ function formatTime(value, withDate = false) {
 
 function renderMetricHistories() {
   el.historyMetrics.innerHTML = Object.entries(metricInfo).map(([key, [label, unit, color]]) => {
-    const points = state.history.filter(item => Number.isFinite(item[key]));
+    const points = displayMetricPoints(state.history, key);
     const digits = key === "air_quality" || key === "raindrop" ? 0 : 1;
     const values = points.map(item => item[key]);
     return `<button class="metric-selector ${key === state.metric ? "active" : ""}" data-metric="${key}">
       <span>${label}</span><strong>${points.length ? show(points.at(-1)[key], digits) : "—"} <small>${unit}</small></strong>
-      <div><b>${points.length} замеров</b><i>${points.length ? `min ${show(Math.min(...values), digits)} · max ${show(Math.max(...values), digits)}` : "нет данных"}</i></div>
+      <div><b>${points.length} замеров</b><i>${points.length ? `${state.showAverage ? `среднее ${points.at(-1).averageCount}/${averageWindow} · ` : ""}min ${show(Math.min(...values), digits)} · max ${show(Math.max(...values), digits)}` : "нет данных"}</i></div>
     </button>`;
   }).join("");
   renderMetricDetail();
@@ -259,20 +284,19 @@ function renderMetricHistories() {
 
 function renderMetricDetail() {
   const [label, unit, color] = metricInfo[state.metric], digits = state.metric === "air_quality" || state.metric === "raindrop" ? 0 : 1;
-  const points = state.history.filter(item => Number.isFinite(item[state.metric]));
+  const points = displayMetricPoints(state.history, state.metric);
   const values = points.map(item => item[state.metric]);
   el.detail.dataset.metric = state.metric; el.detailTitle.textContent = label;
-  const average = points.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-  el.detailStats.textContent = points.length ? `${points.length} замеров · среднее ${show(average, digits)} ${unit} · min ${show(Math.min(...values), digits)} · max ${show(Math.max(...values), digits)}` : "Нет данных";
-  el.explanation.textContent = metricDescriptions[state.metric];
+  el.detailStats.textContent = points.length ? `${points.length} замеров · ${state.showAverage ? `среднее ${show(points.at(-1)[state.metric], digits)} ${unit} (последние ${points.at(-1).averageCount} из ${averageWindow})` : `последний ${show(points.at(-1)[state.metric], digits)} ${unit}`} · min ${show(Math.min(...values), digits)} · max ${show(Math.max(...values), digits)}` : "Нет данных";
+  el.explanation.textContent = `${metricDescriptions[state.metric]} ${state.showAverage ? `Включено скользящее среднее по последним ${averageWindow} замерам; исходные значения сохранены ниже.` : "Показаны исходные замеры. Среднее можно включить над таблицей ESP."}`;
   el.chartFrom.textContent = points.length ? formatTime(sampleTime(points[0]), true) : "—";
   el.chartTo.textContent = points.length ? formatTime(sampleTime(points.at(-1)), true) : "—";
-  el.detailValues.innerHTML = points.length ? `<div class="detail-values-head"><span>Дата и время замера</span><span>Значение</span></div>` + [...points].reverse().map(item => `<div><time>${formatTime(sampleTime(item), true)}</time><strong>${show(item[state.metric], digits)} ${unit}</strong></div>`).join("") : '<p>Эта метрика в выбранный период не поступала.</p>';
+  el.detailValues.innerHTML = points.length ? `<div class="detail-values-head"><span>Дата и время замера</span><span>${state.showAverage ? "Замер · среднее" : "Замер"}</span></div>` + [...points].reverse().map(item => `<div><time>${formatTime(sampleTime(item), true)}</time><strong>${show(item.rawValue, digits)} ${unit}${state.showAverage ? ` · ${show(item[state.metric], digits)} ${unit}` : ""}</strong></div>`).join("") : '<p>Эта метрика в выбранный период не поступала.</p>';
   drawMetricChart(el.detailChart, state.metric);
 }
 
 function drawMetricChart(canvas, metric) {
-  const points = state.history.filter(item => Number.isFinite(item[metric]));
+  const points = displayMetricPoints(state.history, metric);
   if (canvas === el.detailChart) { state.detailPoints = []; el.tooltip.hidden = true; }
   const ratio = window.devicePixelRatio || 1, width = canvas.clientWidth, height = canvas.clientHeight;
   canvas.width = width * ratio; canvas.height = height * ratio;
@@ -304,20 +328,30 @@ function drawMetricChart(canvas, metric) {
 }
 el.range.addEventListener("change", () => { el.dateControl.hidden = el.range.value !== "day"; loadHistory(); });
 el.date.addEventListener("change", loadHistory);
+el.averageToggle.addEventListener("click", () => {
+  state.showAverage = !state.showAverage;
+  el.averageToggle.classList.toggle("active", state.showAverage);
+  el.averageToggle.setAttribute("aria-pressed", String(state.showAverage));
+  el.averageToggle.textContent = `Среднее за ${averageWindow}: ${state.showAverage ? "вкл" : "выкл"}`;
+  renderDevices(); renderMetricHistories();
+  if (state.compareMode) renderComparison();
+});
 el.compareToggle.addEventListener("click", () => setCompareMode(!state.compareMode));
 el.compareClose.addEventListener("click", () => setCompareMode(false));
 el.compareMetric.innerHTML = Object.entries(metricInfo).map(([key,[label]]) => `<option value="${key}">${label}</option>`).join("");
 el.compareMetric.value = "air_temperature";
 el.compareMetric.addEventListener("change", drawComparisonChart);
 el.compareRange.addEventListener("change", loadComparisonHistory);
-el.historyMetrics.addEventListener("click", event => { const button = event.target.closest("[data-metric]"); if (!button) return; state.metric = button.dataset.metric; renderMetricHistories(); el.detail.scrollIntoView({behavior:"smooth", block:"nearest"}); });
+el.historyMetrics.addEventListener("click", event => { const button = event.target.closest("[data-metric]"); if (!button) return; state.metric = button.dataset.metric; sessionStorage.setItem("selectedMetric", state.metric); renderMetricHistories(); el.detail.scrollIntoView({behavior:"smooth", block:"nearest"}); });
 el.detailChart.addEventListener("mousemove", event => {
   if (!state.detailPoints.length) return;
   const box = el.detailChart.getBoundingClientRect(), x = event.clientX - box.left;
   const point = state.detailPoints.reduce((best, current) => Math.abs(current.x-x) < Math.abs(best.x-x) ? current : best);
   const [, unit] = metricInfo[state.metric];
   el.tooltip.hidden = false;
-  el.tooltip.innerHTML = `<strong>${show(point.item[state.metric])} ${unit}</strong><span>${formatTime(sampleTime(point.item), true)}</span>`;
+  el.tooltip.innerHTML = state.showAverage
+    ? `<strong>Среднее ${show(point.item[state.metric])} ${unit}</strong><span>Замер ${show(point.item.rawValue)} ${unit} · ${formatTime(sampleTime(point.item), true)}</span>`
+    : `<strong>${show(point.item[state.metric])} ${unit}</strong><span>${formatTime(sampleTime(point.item), true)}</span>`;
 });
 el.detailChart.addEventListener("mouseleave", () => { el.tooltip.hidden = true; });
 window.addEventListener("resize", () => { drawMetricChart(el.detailChart, state.metric); drawComparisonChart(); });
