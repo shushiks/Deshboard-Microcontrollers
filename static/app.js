@@ -4,6 +4,7 @@ const state = {
 };
 const metricInfo = {
   air_temperature: ["Температура воздуха", "°C", "#64f4bd"],
+  air_pressure: ["Атмосферное давление", "гПа", "#ddacff"],
   water_temperature: ["Температура воды", "°C", "#a99bff"],
   humidity: ["Влажность воздуха", "%", "#54d7ef"],
   air_quality: ["Газовый сигнал MQ-5", "raw", "#f7bf64"],
@@ -12,6 +13,7 @@ const metricInfo = {
 };
 const metricDescriptions = {
   air_temperature: "Температура окружающего воздуха возле контроллера.",
+  air_pressure: "Атмосферное давление по BMP280 в гектопаскалях (гПа). Не влажность и не плотность воздуха.",
   water_temperature: "Температура воды внутри контролируемого резервуара.",
   humidity: "Относительная влажность воздуха: 100% означает максимально насыщенный влагой воздух.",
   air_quality: "Сырое значение газового датчика. Это не проценты: закономерность важнее отдельного числа, а направление зависит от модели датчика.",
@@ -38,6 +40,7 @@ const el = {
   compareChartNote: document.querySelector("#compare-chart-note"),
 };
 const show = (value, digits = 1) => value == null ? "—" : Number(value).toFixed(digits);
+const sampleTime = item => item.measured_at || item.received_at;
 const escapeHtml = value => String(value).replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
 function formatAge(value) {
   if (!value) return "никогда";
@@ -52,7 +55,7 @@ function renderDevices() {
   const onlineCount = state.devices.filter(device => device.online).length;
   el.total.textContent = state.devices.length; el.online.textContent = onlineCount; el.offline.textContent = state.devices.length-onlineCount;
   if (!state.devices.length) { el.row.innerHTML = '<div class="empty-state">Ожидание первого устройства…</div>'; return; }
-  const columns = [["air_temperature","Воздух","°C"],["water_temperature","Вода","°C"],["humidity","Влажность воздуха","%"],["air_quality","Газ MQ-5","raw"],["ph","Кислотность","pH"] ,["raindrop","Интенсивность дождя","raw"]];
+  const columns = [["air_temperature","Воздух","°C"],["air_pressure","Давление","гПа"],["water_temperature","Вода","°C"],["humidity","Влажность воздуха","%"],["air_quality","Газ MQ-5","raw"],["ph","Кислотность","pH"] ,["raindrop","Интенсивность дождя","raw"]];
   el.row.innerHTML = `<div class="fleet-head"><span>Резервуар / ESP</span>${columns.map(([,label]) => `<span>${label}</span>`).join("")}</div>` + state.devices.map(device => `
     <article class="device-card ${device.temperature_alert ? "alert" : ""} ${!state.compareMode && device.device_id === state.selectedId ? "active" : ""} ${state.compareIds.includes(device.device_id) ? "compare-selected" : ""}" data-id="${escapeHtml(device.device_id)}" role="button" tabindex="0" title="Порог температуры: ${show(device.temperature_threshold)} °C; красный цвет — только при свежем превышении" aria-label="${state.compareMode ? "Выбрать для сравнения" : "Открыть историю"} ${escapeHtml(device.name)}">
       <div class="device-identity"><i class="status ${device.online ? "online" : ""}" title="${device.online ? "На связи" : `Нет heartbeat: ${formatAge(device.last_seen)}`}"></i><div><h3>${escapeHtml(device.name)}</h3></div></div>
@@ -132,7 +135,7 @@ function drawComparisonChart() {
   if (!state.compareMode || state.compareIds.length !== 2 || el.compareChartSection.hidden) return;
   const metric = el.compareMetric.value, [label, unit] = metricInfo[metric];
   const ids = state.compareIds, series = ids.map(id => (state.compareHistory[id] || [])
-    .filter(item => Number.isFinite(item[metric]) && Number.isFinite(Date.parse(item.received_at))));
+    .filter(item => Number.isFinite(item[metric]) && Number.isFinite(Date.parse(sampleTime(item)))));
   const count = series.map(points => points.length);
   el.compareChartNote.textContent = `${label}, ${unit}: ${count[0]} и ${count[1]} замеров соответственно. Линии строятся по фактическому времени каждого устройства.`;
   const canvas = el.compareChart, width = canvas.clientWidth, height = canvas.clientHeight;
@@ -147,7 +150,7 @@ function drawComparisonChart() {
   if (!values.length) { ctx.fillStyle = "#8fa9a0"; ctx.font = "12px Manrope, sans-serif"; ctx.fillText("Нет замеров этой метрики за выбранный период", 15, height/2); return; }
   const min = Math.min(...values), max = Math.max(...values), pad = Math.max((max-min)*.15, 1);
   const low = min-pad, high = max+pad;
-  const stamps = series.flatMap(points => points.map(item => Date.parse(item.received_at)));
+  const stamps = series.flatMap(points => points.map(item => Date.parse(sampleTime(item))));
   const firstStamp = Math.min(...stamps), lastStamp = Math.max(...stamps);
   const timePad = Math.max((lastStamp-firstStamp)*.04, 1000);
   const start = firstStamp-timePad, end = lastStamp+timePad;
@@ -165,7 +168,7 @@ function drawComparisonChart() {
   }
   ctx.save(); ctx.beginPath(); ctx.rect(margin.left,margin.top,plotWidth,plotHeight); ctx.clip();
   series.forEach((points,index) => {
-    const coordinates = points.map(item => ({x: margin.left+(Date.parse(item.received_at)-start)/(end-start)*plotWidth,
+    const coordinates = points.map(item => ({x: margin.left+(Date.parse(sampleTime(item))-start)/(end-start)*plotWidth,
       y: margin.top+(high-item[metric])/(high-low)*plotHeight})).filter(point => point.x >= margin.left && point.x <= margin.left+plotWidth);
     if (!coordinates.length) return;
     ctx.strokeStyle = index ? "#a99bff" : "#64f4bd"; ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 2;
@@ -262,9 +265,9 @@ function renderMetricDetail() {
   const average = points.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   el.detailStats.textContent = points.length ? `${points.length} замеров · среднее ${show(average, digits)} ${unit} · min ${show(Math.min(...values), digits)} · max ${show(Math.max(...values), digits)}` : "Нет данных";
   el.explanation.textContent = metricDescriptions[state.metric];
-  el.chartFrom.textContent = points.length ? formatTime(points[0].received_at, true) : "—";
-  el.chartTo.textContent = points.length ? formatTime(points.at(-1).received_at, true) : "—";
-  el.detailValues.innerHTML = points.length ? `<div class="detail-values-head"><span>Дата и время</span><span>Значение</span></div>` + [...points].reverse().map(item => `<div><time>${formatTime(item.received_at, true)}</time><strong>${show(item[state.metric], digits)} ${unit}</strong></div>`).join("") : '<p>Эта метрика в выбранный период не поступала.</p>';
+  el.chartFrom.textContent = points.length ? formatTime(sampleTime(points[0]), true) : "—";
+  el.chartTo.textContent = points.length ? formatTime(sampleTime(points.at(-1)), true) : "—";
+  el.detailValues.innerHTML = points.length ? `<div class="detail-values-head"><span>Дата и время замера</span><span>Значение</span></div>` + [...points].reverse().map(item => `<div><time>${formatTime(sampleTime(item), true)}</time><strong>${show(item[state.metric], digits)} ${unit}</strong></div>`).join("") : '<p>Эта метрика в выбранный период не поступала.</p>';
   drawMetricChart(el.detailChart, state.metric);
 }
 
@@ -286,14 +289,15 @@ function drawMetricChart(canvas, metric) {
     ctx.beginPath(); ctx.moveTo(margin.left,y); ctx.lineTo(width-margin.right,y); ctx.stroke();
     ctx.fillStyle = "#8fa9a0"; ctx.fillText(show(value, metric === "air_quality" || metric === "raindrop" ? 0 : 1), margin.left-7,y);
   }
-  const span = new Date(points.at(-1).received_at)-new Date(points[0].received_at);
+  const span = new Date(sampleTime(points.at(-1)))-new Date(sampleTime(points[0]));
   const timeLabel = value => new Intl.DateTimeFormat("ru-RU", span > 2*86400000 ? {day:"2-digit",month:"2-digit"} : {hour:"2-digit",minute:"2-digit"}).format(new Date(value));
   ctx.textBaseline = "top";
   [[0,points[0]],[.5,points[Math.floor((points.length-1)/2)]],[1,points.at(-1)]].forEach(([fraction,point],index) => {
     const x = margin.left+plotWidth*fraction; ctx.textAlign = index === 0 ? "left" : index === 2 ? "right" : "center";
-    ctx.fillStyle = "#8fa9a0"; ctx.fillText(timeLabel(point.received_at),x,height-margin.bottom+7);
+    ctx.fillStyle = "#8fa9a0"; ctx.fillText(timeLabel(sampleTime(point)),x,height-margin.bottom+7);
   });
-  const coords = points.map((point,index) => ({x: points.length === 1 ? margin.left+plotWidth/2 : margin.left+index/(points.length-1)*plotWidth, y: margin.top+(max+pad-point[metric])/range*plotHeight, item:point}));
+  const firstTime = Date.parse(sampleTime(points[0])), lastTime = Date.parse(sampleTime(points.at(-1)));
+  const coords = points.map(point => ({x: firstTime === lastTime ? margin.left+plotWidth/2 : margin.left+(Date.parse(sampleTime(point))-firstTime)/(lastTime-firstTime)*plotWidth, y: margin.top+(max+pad-point[metric])/range*plotHeight, item:point}));
   if (canvas === el.detailChart) state.detailPoints = coords;
   if (coords.length > 1) { ctx.beginPath(); ctx.strokeStyle = metricInfo[metric][2]; ctx.lineWidth = 2; coords.forEach((p,i) => i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y)); ctx.stroke(); }
   ctx.fillStyle = metricInfo[metric][2]; coords.forEach(point => { ctx.beginPath(); ctx.arc(point.x, point.y, 3, 0, Math.PI*2); ctx.fill(); });
@@ -313,7 +317,7 @@ el.detailChart.addEventListener("mousemove", event => {
   const point = state.detailPoints.reduce((best, current) => Math.abs(current.x-x) < Math.abs(best.x-x) ? current : best);
   const [, unit] = metricInfo[state.metric];
   el.tooltip.hidden = false;
-  el.tooltip.innerHTML = `<strong>${show(point.item[state.metric])} ${unit}</strong><span>${formatTime(point.item.received_at, true)}</span>`;
+  el.tooltip.innerHTML = `<strong>${show(point.item[state.metric])} ${unit}</strong><span>${formatTime(sampleTime(point.item), true)}</span>`;
 });
 el.detailChart.addEventListener("mouseleave", () => { el.tooltip.hidden = true; });
 window.addEventListener("resize", () => { drawMetricChart(el.detailChart, state.metric); drawComparisonChart(); });

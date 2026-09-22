@@ -42,10 +42,12 @@ def initialize_database() -> None:
                 air_quality REAL,
                 humidity REAL,
                 air_temperature REAL,
+                air_pressure REAL,
                 water_temperature REAL,
                 ph REAL,
                 raindrop REAL,
                 captured_at TEXT,
+                sample_id TEXT,
                 received_at TEXT NOT NULL
             );
 
@@ -61,6 +63,12 @@ def initialize_database() -> None:
         ):
             if name not in columns:
                 connection.execute(f"ALTER TABLE devices ADD COLUMN {name} {definition}")
+        reading_columns = {row[1] for row in connection.execute("PRAGMA table_info(readings)")}
+        for name, definition in (("air_pressure", "REAL"), ("sample_id", "TEXT")):
+            if name not in reading_columns:
+                connection.execute(f"ALTER TABLE readings ADD COLUMN {name} {definition}")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_readings_sample_id ON readings(device_id, sample_id)")
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_readings_device_measured ON readings(device_id, COALESCE(captured_at, received_at) DESC)")
 
 
 def save_metrics(payload: MetricsInput) -> dict[str, Any]:
@@ -115,22 +123,29 @@ def save_metrics(payload: MetricsInput) -> dict[str, Any]:
         cursor = connection.execute(
             """
             INSERT INTO readings (
-                device_id, air_quality, humidity, air_temperature, water_temperature,
-                ph, raindrop, captured_at, received_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                device_id, air_quality, humidity, air_temperature, air_pressure, water_temperature,
+                ph, raindrop, captured_at, sample_id, received_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(device_id, sample_id) DO NOTHING
             """,
             (
                 payload.device_id,
                 payload.air_quality,
                 payload.humidity,
                 payload.air_temperature,
+                payload.air_pressure,
                 payload.water_temperature,
                 payload.ph,
                 payload.raindrop,
                 captured_iso,
+                payload.sample_id,
                 received_iso,
             ),
         )
+        reading_id = cursor.lastrowid if cursor.rowcount else connection.execute(
+            "SELECT id FROM readings WHERE device_id = ? AND sample_id = ?",
+            (payload.device_id, payload.sample_id),
+        ).fetchone()["id"]
 
     if should_geocode and final_latitude is not None and final_longitude is not None:
         with _connection() as connection:
@@ -155,8 +170,9 @@ def save_metrics(payload: MetricsInput) -> dict[str, Any]:
             )
 
     return {
-        "id": cursor.lastrowid,
+        "id": reading_id,
         "device_id": payload.device_id,
+        "sample_id": payload.sample_id,
         "received_at": received_iso,
         "captured_at": captured_iso,
     }
@@ -167,18 +183,20 @@ def list_devices() -> list[dict[str, Any]]:
         rows = connection.execute(
             """
             SELECT d.*,
-                   (SELECT air_quality FROM readings WHERE device_id = d.device_id AND air_quality IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS air_quality,
-                   (SELECT received_at FROM readings WHERE device_id = d.device_id AND air_quality IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS air_quality_at,
-                   (SELECT humidity FROM readings WHERE device_id = d.device_id AND humidity IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS humidity,
-                   (SELECT received_at FROM readings WHERE device_id = d.device_id AND humidity IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS humidity_at,
-                   (SELECT air_temperature FROM readings WHERE device_id = d.device_id AND air_temperature IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS air_temperature,
-                   (SELECT received_at FROM readings WHERE device_id = d.device_id AND air_temperature IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS air_temperature_at,
-                   (SELECT water_temperature FROM readings WHERE device_id = d.device_id AND water_temperature IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS water_temperature,
-                   (SELECT received_at FROM readings WHERE device_id = d.device_id AND water_temperature IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS water_temperature_at,
-                   (SELECT ph FROM readings WHERE device_id = d.device_id AND ph IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS ph,
-                   (SELECT received_at FROM readings WHERE device_id = d.device_id AND ph IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS ph_at,
-                   (SELECT raindrop FROM readings WHERE device_id = d.device_id AND raindrop IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS raindrop,
-                   (SELECT received_at FROM readings WHERE device_id = d.device_id AND raindrop IS NOT NULL ORDER BY received_at DESC, id DESC LIMIT 1) AS raindrop_at,
+                   (SELECT air_quality FROM readings WHERE device_id = d.device_id AND air_quality IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS air_quality,
+                   (SELECT COALESCE(captured_at, received_at) FROM readings WHERE device_id = d.device_id AND air_quality IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS air_quality_at,
+                   (SELECT humidity FROM readings WHERE device_id = d.device_id AND humidity IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS humidity,
+                   (SELECT COALESCE(captured_at, received_at) FROM readings WHERE device_id = d.device_id AND humidity IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS humidity_at,
+                   (SELECT air_temperature FROM readings WHERE device_id = d.device_id AND air_temperature IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS air_temperature,
+                   (SELECT COALESCE(captured_at, received_at) FROM readings WHERE device_id = d.device_id AND air_temperature IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS air_temperature_at,
+                   (SELECT air_pressure FROM readings WHERE device_id = d.device_id AND air_pressure IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS air_pressure,
+                   (SELECT COALESCE(captured_at, received_at) FROM readings WHERE device_id = d.device_id AND air_pressure IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS air_pressure_at,
+                   (SELECT water_temperature FROM readings WHERE device_id = d.device_id AND water_temperature IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS water_temperature,
+                   (SELECT COALESCE(captured_at, received_at) FROM readings WHERE device_id = d.device_id AND water_temperature IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS water_temperature_at,
+                   (SELECT ph FROM readings WHERE device_id = d.device_id AND ph IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS ph,
+                   (SELECT COALESCE(captured_at, received_at) FROM readings WHERE device_id = d.device_id AND ph IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS ph_at,
+                   (SELECT raindrop FROM readings WHERE device_id = d.device_id AND raindrop IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS raindrop,
+                   (SELECT COALESCE(captured_at, received_at) FROM readings WHERE device_id = d.device_id AND raindrop IS NOT NULL ORDER BY COALESCE(captured_at, received_at) DESC, id DESC LIMIT 1) AS raindrop_at,
                    r.captured_at, r.received_at
             FROM devices d
             LEFT JOIN readings r ON r.id = (
@@ -243,11 +261,12 @@ def get_history(
 
         rows = connection.execute(
             """
-            SELECT air_quality, humidity, air_temperature,
-                   water_temperature, ph, raindrop, captured_at, received_at
+            SELECT air_quality, humidity, air_temperature, air_pressure,
+                   water_temperature, ph, raindrop, captured_at, received_at,
+                   COALESCE(captured_at, received_at) AS measured_at
             FROM readings
-            WHERE device_id = ? AND received_at >= ? AND received_at < ?
-            ORDER BY received_at DESC, id DESC
+            WHERE device_id = ? AND COALESCE(captured_at, received_at) >= ? AND COALESCE(captured_at, received_at) < ?
+            ORDER BY COALESCE(captured_at, received_at) DESC, id DESC
             LIMIT ?
             """,
             (device_id, since, until, limit),

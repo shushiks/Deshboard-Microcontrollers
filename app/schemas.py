@@ -13,6 +13,7 @@ class MetricsInput(BaseModel):
     air_quality: Annotated[float | None, Field(ge=0, le=4095)] = None
     humidity: Annotated[float | None, Field(ge=0, le=100)] = None
     air_temperature: Annotated[float | None, Field(ge=-80, le=150)] = None
+    air_pressure: Annotated[float | None, Field(ge=300, le=1100)] = None
     water_temperature: Annotated[float | None, Field(ge=-80, le=150)] = None
     ph: Annotated[float | None, Field(ge=0, le=14)] = None
     raindrop: Annotated[float | None, Field(ge=0, le=4095)] = None
@@ -20,6 +21,7 @@ class MetricsInput(BaseModel):
     latitude: Annotated[float | None, Field(ge=-90, le=90)] = None
     longitude: Annotated[float | None, Field(ge=-180, le=180)] = None
     captured_at: datetime | None = None
+    sample_id: Annotated[str | None, Field(min_length=1, max_length=80, pattern=r"^[a-zA-Z0-9_-]+$")] = None
     # Compatibility with the first ESP32 sketch.
     alcohol: Annotated[float | None, Field(ge=0, le=4095)] = Field(default=None, exclude=True)
 
@@ -33,7 +35,7 @@ class MetricsInput(BaseModel):
     def validate_reading(self) -> "MetricsInput":
         metric_fields = {
             "air_quality", "alcohol", "humidity", "air_temperature",
-            "water_temperature", "ph", "raindrop",
+            "water_temperature", "air_pressure", "ph", "raindrop",
         }
         if not any(getattr(self, field) is not None for field in metric_fields):
             raise ValueError("At least one sensor metric must be provided")

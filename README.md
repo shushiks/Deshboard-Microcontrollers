@@ -30,22 +30,32 @@ X-API-Key: your-secret
   "air_quality": 1340,
   "humidity": 61.4,
   "air_temperature": 24.8,
+  "air_pressure": 1008.4,
   "water_temperature": 20.1,
   "ph": null,
   "raindrop": null,
   "latitude": 43.1155,
   "longitude": 131.8855,
-  "captured_at": null
+  "captured_at": "2026-09-22T03:25:00Z",
+  "sample_id": "9a4b124f47db91ee"
 }
 ```
 
 - `received_at` is always created by the server from the computer's UTC clock.
-- `captured_at` is optional and is intended for measurements restored from an SD card.
+- `captured_at` is the ESP's UTC measurement time when its clock has synchronized. The dashboard uses it for history; without it, server receipt time is used.
+- `sample_id` prevents duplicate rows if an SD-backed reading is retried after a lost HTTP response.
+- BMP280 supplies air temperature and atmospheric pressure in hPa, **not humidity**. DHT11 supplies humidity.
 - Coordinates are optional. They must be configured on the ESP32 or supplied by a GPS; a local IP address cannot provide reliable coordinates.
 - Missing sensors may be omitted (or sent as JSON `null`); the dashboard displays them as `—`.
 - The legacy `alcohol` field is accepted and migrated to `air_quality`.
 - `air_quality` is the raw ADC signal from MQ-5 (0–4095), not ppm or a gas percentage.
 - Alert thresholds are device configuration and are changed only through `PATCH /api/devices/{device_id}`.
+
+## Optional microSD buffer on ESP32
+
+The firmware uses SPI: SCK→GPIO18, MISO→GPIO19, MOSI→GPIO23, CS→GPIO13, GND→GND. Confirm the exact module's required VCC and logic voltage before connecting power: the ESP32 pins are 3.3 V, while some SD breakouts require a 5 V supply and include a regulator/level shifter.
+
+Each ready sensor reading is sent immediately; readings ready in the same `loop()` pass share one request. If Wi-Fi or HTTP fails, the JSON is written as a separate file in `/queue` on the SD card. After connectivity returns, saved files are replayed and each file is deleted only after a 2xx response. The server de-duplicates retries via `sample_id`. If the SD module is absent, the ESP keeps only the latest unsent values in RAM; a reboot can then lose them. A cold boot without network time cannot assign a reliable original timestamp to offline measurements.
 
 ## API
 
